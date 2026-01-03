@@ -51,7 +51,7 @@ James never takes the decision away: he is explicitly a reviewer. You (or the pr
    {
      "name": "Ask James",
      "command": "uvx",
-     "args": ["ask-james"],
+    "args": ["ask-james"],
      "env": {
        "OPENAI_API_KEY": "sk-your-openai-key",
        "ASK_JAMES_MODEL": "gpt-5.2"
@@ -69,7 +69,7 @@ James never takes the decision away: he is explicitly a reviewer. You (or the pr
    {
      "name": "Ask James",
      "command": "uvx",
-     "args": ["ask-james"],
+    "args": ["ask-james"],
      "env": {
        "OPENAI_API_KEY": "sk-your-openai-key",
        "ASK_JAMES_MODEL": "gpt-5.2"

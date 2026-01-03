@@ -17,8 +17,6 @@ SERVER_NAME = "ask-james"
 TOOL_NAME = "james.review"
 DEFAULT_MODEL_ENV = "ASK_JAMES_MODEL"
 DEFAULT_CONFIDENCE = "medium"
-DEFAULT_MAX_TOKENS = int(os.getenv("ASK_JAMES_MAX_TOKENS", "800"))
-DEFAULT_TEMPERATURE = float(os.getenv("ASK_JAMES_TEMPERATURE", "0.2"))
 
 SYSTEM_PROMPT = """You are James, a trusted second-opinion engineer. Default to
 a critical stance: assume proposals need improvement unless everything is
@@ -47,40 +45,7 @@ server = Server(SERVER_NAME)
 
 
 class ReviewRequest(BaseModel):
-    proposal: str = Field(..., description="The plan, implementation, or decision to review.")
-    context: Optional[str] = Field(
-        default=None,
-        description="Any surrounding information, stakes, users, or constraints.",
-    )
-    review_focus: List[str] = Field(
-        default_factory=list,
-        description="Explicit areas James should focus on (architecture, cost, ops, etc).",
-    )
-    constraints: List[str] = Field(
-        default_factory=list, description="Hard constraints or policies that must be respected."
-    )
-    assumptions: List[str] = Field(
-        default_factory=list, description="Assumptions already identified by the author."
-    )
-    risk_profile: Literal["low", "medium", "high"] = Field(
-        default="medium", description="How risky the situation is if wrong."
-    )
-    max_questions: int = Field(
-        default=5,
-        ge=1,
-        le=10,
-        description="Maximum number of clarifying questions James should ask.",
-    )
-    model: Optional[str] = Field(
-        default=None,
-        description="Optional per-call override for the reviewer model alias configured in LiteLLM.",
-    )
-    temperature: Optional[float] = Field(
-        default=None,
-        ge=0,
-        le=1,
-        description="Optional per-call temperature override for the reviewer model.",
-    )
+    input: str = Field(..., description="The proposal, plan, or decision for James to review.")
 
 
 class ReviewConcern(BaseModel):
@@ -107,7 +72,7 @@ async def handle_list_tools() -> List[Tool]:
         Tool(
             name=TOOL_NAME,
             description="Ask James for a structured second opinion about a proposal or plan.",
-            input_schema=ReviewRequest.model_json_schema(),
+            inputSchema=ReviewRequest.model_json_schema(),
         )
     ]
 
@@ -123,10 +88,18 @@ async def handle_tool_call(tool_name: str, arguments: Dict[str, Any]) -> List[Te
             )
         ]
 
+    # Fail fast if model not configured
+    if not (os.getenv(DEFAULT_MODEL_ENV) or os.getenv("LITELLM_MODEL")):
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps({"error": "no_model_configured", "details": "Set ASK_JAMES_MODEL or LITELLM_MODEL environment variable."}, indent=2),
+            )
+        ]
+
     try:
         request = ReviewRequest.model_validate(arguments)
     except ValidationError as exc:
-        # Surface validation errors directly in the tool result.
         return [
             TextContent(
                 type="text",
@@ -138,12 +111,10 @@ async def handle_tool_call(tool_name: str, arguments: Dict[str, Any]) -> List[Te
     return [TextContent(type="text", text=json.dumps(review_payload, indent=2))]
 
 
-def determine_model(requested: Optional[str]) -> str:
-    model = requested or os.getenv(DEFAULT_MODEL_ENV) or os.getenv("LITELLM_MODEL")
+def determine_model() -> str:
+    model = os.getenv(DEFAULT_MODEL_ENV) or os.getenv("LITELLM_MODEL")
     if not model:
-        raise RuntimeError(
-            "No model configured. Set ASK_JAMES_MODEL, LITELLM_MODEL, or pass `model` in the tool call."
-        )
+        raise RuntimeError("No model configured. Set ASK_JAMES_MODEL or LITELLM_MODEL.")
     return model
 
 
@@ -151,39 +122,16 @@ def build_prompt(request: ReviewRequest) -> str:
     lines: List[str] = [
         "# Task",
         "Provide a second-opinion review of the following work. This is a critique, not a rewrite.",
-        "# Proposal",
-        request.proposal.strip(),
+        "",
+        "# Input",
+        request.input.strip(),
+        "",
+        "# Output Instructions",
+        "Return only JSON with the keys below. Make clear what is solid, what is wrong or unsuitable, and whether the author should proceed as-is.",
     ]
 
-    if request.context:
-        lines.extend(["", "# Context", request.context.strip()])
-
-    if request.review_focus:
-        focus = "\n".join(f"- {item}" for item in request.review_focus)
-        lines.extend(["", "# Focus", focus])
-
-    if request.constraints:
-        constraints = "\n".join(f"- {item}" for item in request.constraints)
-        lines.extend(["", "# Constraints", constraints])
-
-    if request.assumptions:
-        assumptions = "\n".join(f"- {item}" for item in request.assumptions)
-        lines.extend(["", "# Assumptions Provided", assumptions])
-
-    lines.extend(
-        [
-            "",
-            "# Risk Profile",
-            request.risk_profile,
-            "",
-            "# Output Instructions",
-            "Return only JSON with the keys below. Make clear what is solid, what is wrong or unsuitable, and whether the author should proceed as-is.",
-        ]
-    )
-
     for key, desc in JSON_INSTRUCTIONS.items():
-        extra = " (limit to {n} questions)".format(n=request.max_questions) if key == "questions" else ""
-        lines.append(f"- {key}: {desc}{extra}")
+        lines.append(f"- {key}: {desc}")
 
     lines.append(
         "Do not include markdown fences or commentary. JSON should be the only output."
@@ -210,9 +158,8 @@ def extract_json_block(text: str) -> Dict[str, Any]:
 
 
 async def run_review(request: ReviewRequest) -> Dict[str, Any]:
-    model = determine_model(request.model)
+    model = determine_model()
     user_prompt = build_prompt(request)
-    temperature = request.temperature if request.temperature is not None else DEFAULT_TEMPERATURE
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -223,8 +170,7 @@ async def run_review(request: ReviewRequest) -> Dict[str, Any]:
         completion = await acompletion(
             model=model,
             messages=messages,
-            temperature=temperature,
-            max_tokens=DEFAULT_MAX_TOKENS,
+            timeout=120,  # 2 minute timeout
         )
     except Exception as exc:  # pragma: no cover - surfaces liteLLM errors
         raise RuntimeError(f"LiteLLM request failed: {exc}") from exc
@@ -260,7 +206,11 @@ async def run_review(request: ReviewRequest) -> Dict[str, Any]:
 
 async def main_async() -> None:
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, initialization_options=None)
+        await server.run(
+            read_stream,
+            write_stream,
+            initialization_options=server.create_initialization_options(),
+        )
 
 
 def main() -> None:
