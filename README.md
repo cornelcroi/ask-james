@@ -43,24 +43,25 @@ James never takes the decision away: he is explicitly a reviewer. You (or the pr
 
 ## Quick start (step-by-step)
 
-1. **Install or run the package**
+1. **Reference James via uvx**
 
-   - **Use uvx (recommended, no global install):**
+   You don’t need to install anything manually. Just point your MCP host at:
 
-     ```bash
-     uvx ask-james -- --help
-     ```
+   ```json
+   {
+     "name": "Ask James",
+     "command": "uvx",
+     "args": ["ask-james"],
+     "env": {
+       "OPENAI_API_KEY": "sk-your-openai-key",
+       "ASK_JAMES_MODEL": "gpt-5.2"
+     }
+   }
+   ```
 
-     The `uvx` tool will download and cache `ask-james` automatically whenever the MCP host starts it.
+   (`uvx` downloads and caches the package automatically.)
 
-   - **Or install via pip (if you maintain your own environment):**
-
-     ```bash
-     pip install ask-james
-     ```
-
-
-2. **Add your API key + model to the MCP config**
+2. **Swap in your provider’s key/model**
 
    LiteLLM reads provider-specific environment variables (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). Embed the correct pair for the provider you’re using directly in the MCP config. Example for OpenAI:
 
@@ -78,9 +79,9 @@ James never takes the decision away: he is explicitly a reviewer. You (or the pr
 
    Swap `OPENAI_API_KEY` for whichever variable LiteLLM expects (Anthropic, Google, Azure, Ollama, etc.).
 
-3. **Register James with your MCP host**
+3. **Save the config in your MCP host**
 
-   Drop the snippet above into the host’s MCP configuration file (`claude_desktop_config.json`, `mcp-tools.json`, etc.). Once saved, the host automatically launches James via `uvx` whenever you ask for a second opinion.
+   Paste the JSON into the host’s MCP configuration file (`claude_desktop_config.json`, `mcp-tools.json`, etc.). Once saved, the host automatically launches James via `uvx` whenever you ask for a second opinion.
 
 
 ## Configuration

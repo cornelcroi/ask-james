@@ -260,7 +260,7 @@ async def run_review(request: ReviewRequest) -> Dict[str, Any]:
 
 async def main_async() -> None:
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream)
+        await server.run(read_stream, write_stream, initialization_options=None)
 
 
 def main() -> None:
