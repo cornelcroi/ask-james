@@ -172,8 +172,10 @@ async def run_review(request: ReviewRequest) -> Dict[str, Any]:
             messages=messages,
             timeout=120,  # 2 minute timeout
         )
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(f"LiteLLM request timed out after 120s") from exc
     except Exception as exc:  # pragma: no cover - surfaces liteLLM errors
-        raise RuntimeError(f"LiteLLM request failed: {exc}") from exc
+        raise RuntimeError(f"LiteLLM request failed ({type(exc).__name__}): {exc}") from exc
 
     content = completion.choices[0].message["content"] if isinstance(
         completion.choices[0].message, dict

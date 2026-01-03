@@ -75,6 +75,7 @@ jobs:
           else
             echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
             git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
 
