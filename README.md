@@ -13,7 +13,7 @@ Instead of bouncing between tabs, James gives you:
 ## Highlights
 
 - **Single-focus tool** – `james.review` ingests a proposal plus contextual metadata and returns a JSON critique (summary, risks, questions to ask, positives, and next steps).
-- **LLM-agnostic** – Uses [LiteLLM](https://github.com/BerriAI/litellm) so you can point James at any supported provider/model via environment config or a LiteLLM YAML file.
+- **LLM-agnostic** – Uses [LiteLLM](https://github.com/BerriAI/litellm) so you can point James at any supported provider/model just by changing environment variables.
 - **Named persona** – James never overwrites the primary assistant. He only critiques, surfaces assumptions, and suggests safer next steps.
 - **Stdio transport** – Works out of the box with MCP clients such as the Claude desktop app or custom hosts.
 - **Human-in-the-loop** – James never takes action; he just challenges the suggestion so you or the host assistant can choose the best final answer.
@@ -41,60 +41,46 @@ That workflow is powerful but clunky. `ask-james` automates it without changing 
 
 James never takes the decision away: he is explicitly a reviewer. You (or the primary assistant) remain responsible for the final call, with James providing the structured critique that normally requires a second human.
 
-## Quick start
+## Quick start (step-by-step)
 
-1. **Install the server from PyPI**
+1. **Install the package**
 
    ```bash
    pip install ask-james
    ```
 
-   (Developers can still clone the repo and run `pip install -e .` for local editing.)
+2. **Add your API key + model to the MCP config**
 
-2. **Configure LiteLLM (keys + model)**
-
-   ```bash
-   export OPENAI_API_KEY=sk-...
-   export ASK_JAMES_MODEL=gpt-4o-mini   # or any LiteLLM alias
-   ```
-
-   > You can also supply a `litellm_config.yaml` if you prefer named routes.
-
-3. **Run the server**
-
-   ```bash
-   ask-james   # or: python -m ask_james
-   ```
-
-4. **Tell your MCP host**
-
-   Point the host’s configuration at the command above. Claude desktop, for example, expects an entry like:
+   LiteLLM reads provider-specific environment variables (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). Embed the correct pair for the provider you’re using directly in the MCP config. Example for OpenAI:
 
    ```json
    {
      "name": "Ask James",
-     "command": "ask-james"
+     "command": "ask-james",
+     "env": {
+       "OPENAI_API_KEY": "sk-your-openai-key",
+       "ASK_JAMES_MODEL": "gpt-5.2"
+     }
    }
    ```
 
-   Kiro, Cursor, and other MCP-aware assistants follow the same pattern: give the assistant a friendly name plus the `ask-james` command. Once added, “Ask James what he thinks” becomes an available tool call in the host UI.
+   Swap `OPENAI_API_KEY` for whichever variable LiteLLM expects (Anthropic, Google, Azure, Ollama, etc.).
+
+3. **Register James with your MCP host**
+
+   Drop the snippet above into the host’s MCP configuration file (`claude_desktop_config.json`, `mcp-tools.json`, etc.). Once saved, the host automatically launches James whenever you ask for a second opinion.
 
 ## Installation
 
 ```bash
-pip install -e .
+pip install ask-james
 ```
 
-(You can also package/publish it like any other Python project – it has a standard `pyproject.toml`.)
+Developers who want to edit locally can clone the repo and run `pip install -e .`, but PyPI is the recommended path for MCP hosts.
 
 ## Configuration
 
-LiteLLM handles provider credentials. Point James at any model by either:
-
-- Setting `ASK_JAMES_MODEL` (preferred) or `LITELLM_MODEL`, e.g. `export ASK_JAMES_MODEL=gpt-4o-mini`, **or**
-- Providing a `litellm_config.yaml` with routing + keys and then referencing a model alias in `ASK_JAMES_MODEL`.
-
-Optional environment variables:
+James relies on LiteLLM’s environment variables. Set your provider’s API key using the variable name LiteLLM expects (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) plus `ASK_JAMES_MODEL`. Optional knobs:
 
 | Variable | Purpose |
 | --- | --- |
@@ -102,29 +88,7 @@ Optional environment variables:
 | `ASK_JAMES_MAX_TOKENS` | Hard cap on response size (defaults to `800`). |
 | `ASK_JAMES_TEMPERATURE` | Floating point temperature override (defaults to `0.2`). |
 
-Every request can also pass a `model` field to override the default per tool call. See `ask_james/server.py` for additional knobs (max tokens, temperature, JSON schema).
-
-### Example LiteLLM config
-
-```yaml
-model_list:
-  - model_name: james-gpt4o
-    litellm_params:
-      model: gpt-4o-mini
-      api_key: ${OPENAI_API_KEY}
-  - model_name: james-claude
-    litellm_params:
-      model: anthropic/claude-3-5-sonnet
-      api_key: ${ANTHROPIC_API_KEY}
-```
-
-Then point James at one of the aliases:
-
-```bash
-export ASK_JAMES_MODEL=james-gpt4o
-```
-
-Per-call overrides work the same way: pass `{"model": "james-claude"}` inside the tool arguments whenever you want a stricter reviewer.
+Every request can also pass `model` or `temperature` inside the tool call to override the defaults. Full schema lives in `ask_james/server.py` if you need to inspect it.
 
 ## Running the server
 
@@ -138,91 +102,99 @@ For local debugging you can also run `python -m ask_james` in a shell and pipe J
 
 ## Using with LLM-based assistants
 
-Any MCP-compatible assistant can treat James as a tool. Common examples:
+All hosts need the same three things:
 
-- **Claude Desktop** – Preferences → Tools → “Add new tool”, then enter `ask-james`. Claude will surface James as an action (“Ask James what he thinks”) whenever the conversation calls for a second opinion.
-- **Kiro / Cursor / Windsurf (VS Code)** – Add a new MCP tool in their settings or configuration JSON, pointing to the same command. Most IDE assistants let you toggle whether the tool is auto-invoked or only called when explicitly requested.
-- **Custom orchestrators / CLI agents** – Register `ask-james` in your MCP tool registry and call `james.review` whenever the primary assistant wants a critique. Because the tool contract is pure JSON, you can feed/parse it programmatically.
+1. `ask-james` installed on PATH (`pip install ask-james`).
+2. An MCP config entry pointing to `ask-james`.
+3. The LiteLLM credentials embedded in that config via an `env` block.
 
-If your assistant does not expose a UI for MCP tools yet, you can still run James independently and send tool calls via the MCP JSON-RPC protocol (see `mcp` Python docs for reference).
-
-## Tool schema
-
-`james.review` accepts the following JSON arguments:
+Use this template everywhere (swap the key name for your provider):
 
 ```json
 {
-  "proposal": "string – required",
-  "context": "string – optional",
-  "review_focus": ["architecture", "operational risk"],
-  "constraints": ["2-person team", "MVP timeline"],
-  "assumptions": ["< 1k rps"],
-  "risk_profile": "low | medium | high",
-  "max_questions": 5,
-  "model": "optional override",
-  "temperature": 0.2
+  "name": "Ask James",
+  "command": "ask-james",
+  "env": {
+    "OPENAI_API_KEY": "sk-your-openai-key",
+    "ASK_JAMES_MODEL": "gpt-5.2"
+  }
 }
 ```
 
-It always returns JSON shaped like:
+### Claude Desktop (`claude_desktop_config.json`)
 
 ```json
 {
-  "summary": "Overall judgment",
-  "confidence": "low | medium | high",
-  "key_concerns": [
+  "tools": [
     {
-      "concern": "",
-      "why_it_matters": "",
-      "suggested_fix": "",
-      "severity": "low | medium | high"
+      "name": "Ask James",
+      "command": "ask-james",
+      "env": {
+        "OPENAI_API_KEY": "sk-your-openai-key",
+        "ASK_JAMES_MODEL": "gpt-5.2"
+      }
     }
-  ],
-  "questions": [""],
-  "positive_signals": [""],
-  "next_steps": [""],
-  "assumptions_to_verify": [""],
-  "raw_response": "original text in case parsing was lossy"
+  ]
 }
 ```
 
-As long as James can produce JSON that matches this schema, any MCP client can interpret the critique programmatically.
-
-### Sample request/response
-
-```jsonc
-// Tool call arguments sent by the host
-{
-  "proposal": "Implement MCP server with one review tool",
-  "context": "Used by Claude desktop to double-check designs",
-  "review_focus": ["simplicity", "safety"],
-  "constraints": ["Must run over stdio"],
-  "risk_profile": "medium"
-}
-```
-
-Possible response from James:
+### Kiro (Settings → MCP Tools)
 
 ```json
 {
-  "summary": "Clean single-tool design; make sure model config is explicit.",
-  "confidence": "medium",
-  "key_concerns": [
-    {
-      "concern": "No gating when to call James",
-      "why_it_matters": "Hosts might overuse the tool",
-      "suggested_fix": "Add policy to only call on implementation questions",
-      "severity": "medium"
-    }
-  ],
-  "positive_signals": ["Clear schema"],
-  "questions": ["How do we choose models for different teams?"],
-  "next_steps": ["Document trigger policy"],
-  "assumptions_to_verify": ["Host handles arbitration"],
-  "raw_response": "...",
-  "model_used": "gpt-4o-mini"
+  "id": "ask-james",
+  "name": "Ask James",
+  "command": "ask-james",
+  "env": {
+    "OPENAI_API_KEY": "sk-your-openai-key",
+    "ASK_JAMES_MODEL": "gpt-5.2"
+  }
 }
 ```
+
+### Cursor / Windsurf (`mcp-tools.json`)
+
+```json
+{
+  "tools": [
+    {
+      "name": "Ask James",
+      "command": "ask-james",
+      "env": {
+        "OPENAI_API_KEY": "sk-your-openai-key",
+        "ASK_JAMES_MODEL": "gpt-5.2"
+      }
+    }
+  ]
+}
+```
+
+### Custom hosts / CLI orchestrators
+
+Register the same structure in your MCP registry. Because the env block travels with the config, the host always launches James with the right key/model. Then call `james.review` with the JSON payload described below and parse the critique.
+
+> **Security note:** These config files often live locally but still contain secrets. Store them in a secure location, avoid committing them to git, and rotate keys if the file is shared. Remember to replace `OPENAI_API_KEY` with the provider-specific variable LiteLLM expects if you’re not using OpenAI.
+
+If your assistant does not expose a UI for MCP tools yet, you can still run James independently and send tool calls via the MCP JSON-RPC protocol (see `mcp` Python docs).
+
+## Tool hints (how to talk to James)
+
+James listens for whatever the primary assistant passes as the `proposal` and optional context. Here are a few prompts you can give your assistant (Claude, Kiro, Cursor, etc.) so it knows when to call `james.review`:
+
+- *“Draft an MCP server plan, then ask James to critique it.”*
+- *“Here’s an implementation plan—call James for a second opinion before finalizing.”*
+- *“I’m about to send this customer response; ask James to flag any risks.”*
+- *“Challenge this architecture with James and summarize what he worries about.”*
+
+Typical output James sends back (summarized in plain language):
+
+- **Summary** – Does the plan look solid overall? Should you proceed, tweak, or rethink?
+- **Key concerns** – Explicit issues with severity, impact, and suggestions.
+- **Questions** – Follow-ups James would ask the author.
+- **Positive signals** – Parts that look good so you know what not to over-optimize.
+- **Next steps & assumptions** – Actionable follow-ups and things to verify.
+
+If you need to integrate James programmatically, the `james.review` tool accepts JSON fields like `proposal`, `context`, `review_focus`, `constraints`, `assumptions`, `risk_profile`, `max_questions`, `model`, and `temperature`; and it returns the structured fields shown above plus `model_used` and `raw_response`. Most hosts serialize these automatically, but the schema is available in `ask_james/server.py` if you need to inspect it directly.
 
 ## Recommendation / reasoning
 
@@ -244,4 +216,4 @@ Issues and pull requests are welcome. If you’re proposing substantial changes 
 
 ## License
 
-Specify your preferred license (MIT/BSD/etc.) and drop it in `LICENSE`. Until then, treat the project as “all rights reserved.”
+Released under the MIT License. See `LICENSE` for details.
