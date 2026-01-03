@@ -43,11 +43,22 @@ James never takes the decision away: he is explicitly a reviewer. You (or the pr
 
 ## Quick start (step-by-step)
 
-1. **Install the package**
+1. **Install or run the package**
 
-   ```bash
-   pip install ask-james
-   ```
+   - **Use uvx (recommended, no global install):**
+
+     ```bash
+     uvx ask-james -- --help
+     ```
+
+     The `uvx` tool will download and cache `ask-james` automatically whenever the MCP host starts it.
+
+   - **Or install via pip (if you maintain your own environment):**
+
+     ```bash
+     pip install ask-james
+     ```
+
 
 2. **Add your API key + model to the MCP config**
 
@@ -56,7 +67,8 @@ James never takes the decision away: he is explicitly a reviewer. You (or the pr
    ```json
    {
      "name": "Ask James",
-     "command": "ask-james",
+     "command": "uvx",
+     "args": ["ask-james"],
      "env": {
        "OPENAI_API_KEY": "sk-your-openai-key",
        "ASK_JAMES_MODEL": "gpt-5.2"
@@ -68,58 +80,35 @@ James never takes the decision away: he is explicitly a reviewer. You (or the pr
 
 3. **Register James with your MCP host**
 
-   Drop the snippet above into the host’s MCP configuration file (`claude_desktop_config.json`, `mcp-tools.json`, etc.). Once saved, the host automatically launches James whenever you ask for a second opinion.
+   Drop the snippet above into the host’s MCP configuration file (`claude_desktop_config.json`, `mcp-tools.json`, etc.). Once saved, the host automatically launches James via `uvx` whenever you ask for a second opinion.
 
-## Installation
-
-```bash
-pip install ask-james
-```
-
-Developers who want to edit locally can clone the repo and run `pip install -e .`, but PyPI is the recommended path for MCP hosts.
 
 ## Configuration
 
-James relies on LiteLLM’s environment variables. Set your provider’s API key using the variable name LiteLLM expects (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) plus `ASK_JAMES_MODEL`. Optional knobs:
+James relies on LiteLLM’s environment variables. Set your provider’s API key using the variable name LiteLLM expects (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) plus `ASK_JAMES_MODEL`. The tool schema (including optional fields like `model` or `temperature`) is defined in `ask_james/server.py` if you need to inspect it.
 
-| Variable | Purpose |
-| --- | --- |
-| `ASK_JAMES_MODEL` | Default model alias/name for reviewer calls. Overrides `LITELLM_MODEL`. |
-| `ASK_JAMES_MAX_TOKENS` | Hard cap on response size (defaults to `800`). |
-| `ASK_JAMES_TEMPERATURE` | Floating point temperature override (defaults to `0.2`). |
-
-Every request can also pass `model` or `temperature` inside the tool call to override the defaults. Full schema lives in `ask_james/server.py` if you need to inspect it.
-
-## Running the server
-
-Most MCP hosts expect a command that speaks stdio. Once installed you can point the host at:
-
-```bash
-ask-james
-```
-
-For local debugging you can also run `python -m ask_james` in a shell and pipe JSON-RPC payloads in/out (useful when testing with `socat` or custom clients).
 
 ## Using with LLM-based assistants
 
 All hosts need the same three things:
 
-1. `ask-james` installed on PATH (`pip install ask-james`).
-2. An MCP config entry pointing to `ask-james`.
-3. The LiteLLM credentials embedded in that config via an `env` block.
+1. An MCP config entry pointing to `ask-james`.
+2. The LiteLLM credentials embedded in that config via an `env` block.
 
-Use this template everywhere (swap the key name for your provider):
+Use this template everywhere (swap the key name for your provider; `command` stays `uvx` so the host can fetch/run the package automatically):
 
 ```json
 {
   "name": "Ask James",
-  "command": "ask-james",
+  "command": "uvx",
+  "args": ["ask-james"],
   "env": {
     "OPENAI_API_KEY": "sk-your-openai-key",
     "ASK_JAMES_MODEL": "gpt-5.2"
   }
 }
 ```
+
 
 ### Claude Desktop (`claude_desktop_config.json`)
 
@@ -128,7 +117,8 @@ Use this template everywhere (swap the key name for your provider):
   "tools": [
     {
       "name": "Ask James",
-      "command": "ask-james",
+      "command": "uvx",
+      "args": ["ask-james"],
       "env": {
         "OPENAI_API_KEY": "sk-your-openai-key",
         "ASK_JAMES_MODEL": "gpt-5.2"
@@ -144,7 +134,8 @@ Use this template everywhere (swap the key name for your provider):
 {
   "id": "ask-james",
   "name": "Ask James",
-  "command": "ask-james",
+  "command": "uvx",
+  "args": ["ask-james"],
   "env": {
     "OPENAI_API_KEY": "sk-your-openai-key",
     "ASK_JAMES_MODEL": "gpt-5.2"
@@ -159,7 +150,8 @@ Use this template everywhere (swap the key name for your provider):
   "tools": [
     {
       "name": "Ask James",
-      "command": "ask-james",
+      "command": "uvx",
+      "args": ["ask-james"],
       "env": {
         "OPENAI_API_KEY": "sk-your-openai-key",
         "ASK_JAMES_MODEL": "gpt-5.2"
@@ -168,14 +160,6 @@ Use this template everywhere (swap the key name for your provider):
   ]
 }
 ```
-
-### Custom hosts / CLI orchestrators
-
-Register the same structure in your MCP registry. Because the env block travels with the config, the host always launches James with the right key/model. Then call `james.review` with the JSON payload described below and parse the critique.
-
-> **Security note:** These config files often live locally but still contain secrets. Store them in a secure location, avoid committing them to git, and rotate keys if the file is shared. Remember to replace `OPENAI_API_KEY` with the provider-specific variable LiteLLM expects if you’re not using OpenAI.
-
-If your assistant does not expose a UI for MCP tools yet, you can still run James independently and send tool calls via the MCP JSON-RPC protocol (see `mcp` Python docs).
 
 ## Tool hints (how to talk to James)
 
@@ -200,7 +184,6 @@ If you need to integrate James programmatically, the `james.review` tool accepts
 
 - MCP stdio mode makes this trivial to embed into Claude, VS Code MCP hosts, or custom orchestrators without running a network service.
 - LiteLLM keeps you model-neutral and instantly compatible with OpenAI, Anthropic, Google, Azure OpenAI, Ollama, etc. Changing James's voice is as simple as pointing at a different model alias.
-- Keeping the tool count to one (`james.review`) matches the mental model: “ask James when you need a second opinion.” Future extensions (red-team mode, question-only mode) can live under the same namespace if needed.
 - Persona-first design: James critiques, flags risks, and asks questions; the host model remains responsible for the final answer. This avoids “two agents arguing” and mirrors human peer review.
 
 ## Development
