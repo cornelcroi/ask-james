@@ -1,135 +1,137 @@
 # ask-james
 
-### Tired of copy/pasting between assistants just to get a second opinion?
+**Get a second opinion from another LLM — without leaving your assistant.**
 
-`ask-james` ends that dance. It is an open-source Model Context Protocol (MCP) server that wraps your “ask another assistant what they think” habit into a single tool – `james.review`. James behaves like a trusted colleague who reviews designs or implementation plans, and because the server runs over stdio any MCP-compatible host (Claude desktop, Kiro, Cursor/Windsurf, custom orchestrators) can invoke him on demand.
+`ask-james` is an MCP server that lets any AI assistant (Claude, Kiro, Cursor, etc.) call out to a different LLM for a critical review. Say "ask James what he thinks" and get structured feedback on your plan before you commit.
 
-Instead of bouncing between tabs, James gives you:
+## Example
 
-- one command (`ask-james`) to plug into any assistant
-- a consistent persona that critiques, not rewrites
-- flexible model backing via LiteLLM, so the review voice can be Claude today and GPT tomorrow
+Here's James in action during a Kiro CLI session:
 
-## Highlights
+```shell
+> I need a list of POI in Paris using OpenStreetMap
 
-- **Single-focus tool** – `james.review` ingests a proposal plus contextual metadata and returns a JSON critique (summary, risks, questions to ask, positives, and next steps).
-- **LLM-agnostic** – Uses [LiteLLM](https://github.com/BerriAI/litellm) so you can point James at any supported provider/model just by changing environment variables.
-- **Named persona** – James never overwrites the primary assistant. He only critiques, surfaces assumptions, and suggests safer next steps.
-- **Stdio transport** – Works out of the box with MCP clients such as the Claude desktop app or custom hosts.
-- **Human-in-the-loop** – James never takes action; he just challenges the suggestion so you or the host assistant can choose the best final answer.
+Kiro: I'll create a Python script using the Overpass API...
 
-## Why this exists
+    def get_paris_poi():
+        query = """
+        [out:json][timeout:25];
+        (
+          node["tourism"~"attraction|museum|monument|viewpoint"]["name"](area:3600071525);
+          way["tourism"~"attraction|museum|monument|viewpoint"]["name"](area:3600071525);
+        );
+        out center meta;
+        """
+        # ... fetch and parse response
 
-Do you ever:
+> Ask James for a second opinion
 
-- ask your main assistant for a proposal,
-- copy the whole thing into another assistant to get a “different take,” and
-- paste the critique back into the first chat to reconcile it all manually?
+James:
 
-That workflow is powerful but clunky. `ask-james` automates it without changing the way you think: you still own the conversation, you just say “ask James what he thinks,” and the second-opinion pass happens behind the scenes. James shows up with structured critique, assumptions to verify, and questions to ask—no tab juggling required.
+  Your approach has solid foundations but several issues:
 
-**Best part:** it works in both directions. If you bounce between, say, Claude and Kiro, install `ask-james` in both. When you’re in Claude you can ask Kiro-for-James’s-take, and when you’re in Kiro you can pull Claude’s tone through the same tool. The review pattern stays consistent no matter which assistant you start with.
+  Key concerns:
+  - Filtering is too narrow — only tourism tags will miss landmarks
+    tagged as historic, amenity, or leisure
+  - Ways/relations don't have direct coordinates — you need out center;
+  - "Top 50" is meaningless without defining how to rank POIs
 
-### When to use James
+  What looks solid:
+  - Using Overpass API is the right approach
+  - Querying nodes/ways/relations is correct
 
-`ask-james` shines whenever you need to challenge an assistant’s suggestion before acting:
+  Questions:
+  - What exactly counts as a POI for your use case?
+  - How should results be sorted — by name, importance, distance?
+  - Paris city proper or greater metro area?
+```
 
-- **Implementation plans** – Your primary assistant proposes an architecture or refactor; James critiques it so you don’t blindly follow the first answer.
-- **Product or policy decisions** – Use James to stress-test assumptions, hidden risks, or compliance angles before presenting a recommendation.
-- **Support / operations workflows** – When an assistant suggests a customer-facing response, have James flag risky language or missing steps before sending it.
-- **High-stakes automation** – Anytime acting on an LLM’s plan has real impact (deploys, refunds, irreversible operations), call James so the decision-maker (you or the host model) hears dissenting views.
+The assistant proposed code. James caught the gaps. Now you can decide with full context.
 
-James never takes the decision away: he is explicitly a reviewer. You (or the primary assistant) remain responsible for the final call, with James providing the structured critique that normally requires a second human.
+*Think about your last implementation — would a second opinion have saved you time?*
 
-## Quick start (step-by-step)
+## Quick start
 
-1. **Reference James via uvx**
-
-   You don’t need to install anything manually. Just point your MCP host at:
-
-   ```json
-   {
-     "name": "Ask James",
-     "command": "uvx",
-    "args": ["ask-james"],
-     "env": {
-       "OPENAI_API_KEY": "sk-your-openai-key",
-       "ASK_JAMES_MODEL": "gpt-5.2"
-     }
-   }
-   ```
-
-   (`uvx` downloads and caches the package automatically.)
-
-2. **Swap in your provider’s key/model**
-
-   LiteLLM reads provider-specific environment variables (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). Embed the correct pair for the provider you’re using directly in the MCP config. Example for OpenAI:
-
-   ```json
-   {
-     "name": "Ask James",
-     "command": "uvx",
-    "args": ["ask-james"],
-     "env": {
-       "OPENAI_API_KEY": "sk-your-openai-key",
-       "ASK_JAMES_MODEL": "gpt-5.2"
-     }
-   }
-   ```
-
-   Swap `OPENAI_API_KEY` for whichever variable LiteLLM expects (Anthropic, Google, Azure, Ollama, etc.).
-
-3. **Save the config in your MCP host**
-
-   Paste the JSON into the host’s MCP configuration file (`claude_desktop_config.json`, `mcp-tools.json`, etc.). Once saved, the host automatically launches James via `uvx` whenever you ask for a second opinion.
-
-
-## Configuration
-
-James relies on LiteLLM’s environment variables. Set your provider’s API key using the variable name LiteLLM expects (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) plus `ASK_JAMES_MODEL`. The tool schema (including optional fields like `model` or `temperature`) is defined in `ask_james/server.py` if you need to inspect it.
-
-
-## Using with LLM-based assistants
-
-All hosts need the same three things:
-
-1. An MCP config entry pointing to `ask-james`.
-2. The LiteLLM credentials embedded in that config via an `env` block.
-
-Use this template everywhere (swap the key name for your provider; `command` stays `uvx` so the host can fetch/run the package automatically):
+Add this to your MCP host config:
 
 ```json
 {
-  "name": "Ask James",
   "command": "uvx",
   "args": ["ask-james"],
   "env": {
-    "OPENAI_API_KEY": "sk-your-openai-key",
-    "ASK_JAMES_MODEL": "gpt-5.2"
+    "ASK_JAMES_API_KEY": "your-api-key",
+    "ASK_JAMES_MODEL": "gpt-4o"
   }
 }
 ```
 
+That's it. `uvx` downloads and runs the package automatically.
 
-### Claude Desktop (`claude_desktop_config.json`)
+## How it works
+
+```
+┌─────────────┐     "ask James"     ┌─────────────┐
+│   Claude    │ ──────────────────► │  ask-james  │
+│   / Kiro    │                     │ (MCP server)│
+│   / Cursor  │ ◄────────────────── │             │
+└─────────────┘    critique back    └──────┬──────┘
+                                           │
+                                           ▼
+                                    ┌─────────────┐
+                                    │  Any LLM    │
+                                    │ (via LiteLLM)│
+                                    └─────────────┘
+```
+
+- Your assistant sends the proposal to James via MCP
+- James (powered by any LLM you choose) reviews it critically
+- You get structured feedback: concerns, positives, questions, next steps
+- James never rewrites — he only critiques
+
+**Pro tip:** Use two different frontier models for best results. For example, Claude Opus 4.5 as your primary assistant with GPT-5.2 as James — or vice versa. Different models catch different blind spots.
+
+## Configuration
+
+| Variable | Description |
+|----------|-------------|
+| `ASK_JAMES_MODEL` | Model to use (e.g., `gpt-4o`, `claude-3-5-sonnet-20241022`) |
+| `ASK_JAMES_API_KEY` | Your API key (works with any provider) |
+
+Ask James supports **any model supported by [LiteLLM](https://docs.litellm.ai/docs/providers)** — OpenAI, Anthropic, Google, Azure, Ollama, and 100+ others.
+
+Or omit `ASK_JAMES_API_KEY` and set the provider's native variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) — LiteLLM picks it up automatically.
+
+## When to use James
+
+- **Implementation plans** — Before blindly following an assistant's architecture
+- **High-stakes changes** — Deploys, refunds, irreversible operations
+- **Decisions under uncertainty** — When you want a dissenting view
+- **Code review** — Quick sanity check on proposed changes
+
+## Host configurations
+
+### Claude Desktop
+
+`~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
-  "tools": [
-    {
-      "name": "Ask James",
+  "mcpServers": {
+    "ask-james": {
       "command": "uvx",
       "args": ["ask-james"],
       "env": {
-        "OPENAI_API_KEY": "sk-your-openai-key",
-        "ASK_JAMES_MODEL": "gpt-5.2"
+        "ASK_JAMES_API_KEY": "your-api-key",
+        "ASK_JAMES_MODEL": "gpt-4o"
       }
     }
-  ]
+  }
 }
 ```
 
-### Kiro (Settings → MCP Tools)
+### Kiro
+
+Settings → MCP Tools:
 
 ```json
 {
@@ -138,13 +140,15 @@ Use this template everywhere (swap the key name for your provider; `command` sta
   "command": "uvx",
   "args": ["ask-james"],
   "env": {
-    "OPENAI_API_KEY": "sk-your-openai-key",
-    "ASK_JAMES_MODEL": "gpt-5.2"
+    "ASK_JAMES_API_KEY": "your-api-key",
+    "ASK_JAMES_MODEL": "gpt-4o"
   }
 }
 ```
 
-### Cursor / Windsurf (`mcp-tools.json`)
+### Cursor / Windsurf
+
+`mcp-tools.json`:
 
 ```json
 {
@@ -154,50 +158,29 @@ Use this template everywhere (swap the key name for your provider; `command` sta
       "command": "uvx",
       "args": ["ask-james"],
       "env": {
-        "OPENAI_API_KEY": "sk-your-openai-key",
-        "ASK_JAMES_MODEL": "gpt-5.2"
+        "ASK_JAMES_API_KEY": "your-api-key",
+        "ASK_JAMES_MODEL": "gpt-4o"
       }
     }
   ]
 }
 ```
 
-## Tool hints (how to talk to James)
+## Prompting tips
 
-James listens for whatever the primary assistant passes as the `proposal` and optional context. Here are a few prompts you can give your assistant (Claude, Kiro, Cursor, etc.) so it knows when to call `james.review`:
+Just tell your assistant to ask James:
 
-- *“Draft an MCP server plan, then ask James to critique it.”*
-- *“Here’s an implementation plan—call James for a second opinion before finalizing.”*
-- *“I’m about to send this customer response; ask James to flag any risks.”*
-- *“Challenge this architecture with James and summarize what he worries about.”*
-
-Typical output James sends back (summarized in plain language):
-
-- **Summary** – Does the plan look solid overall? Should you proceed, tweak, or rethink?
-- **Key concerns** – Explicit issues with severity, impact, and suggestions.
-- **Questions** – Follow-ups James would ask the author.
-- **Positive signals** – Parts that look good so you know what not to over-optimize.
-- **Next steps & assumptions** – Actionable follow-ups and things to verify.
-
-If you need to integrate James programmatically, the `james.review` tool accepts JSON fields like `proposal`, `context`, `review_focus`, `constraints`, `assumptions`, `risk_profile`, `max_questions`, `model`, and `temperature`; and it returns the structured fields shown above plus `model_used` and `raw_response`. Most hosts serialize these automatically, but the schema is available in `ask_james/server.py` if you need to inspect it directly.
-
-## Recommendation / reasoning
-
-- MCP stdio mode makes this trivial to embed into Claude, VS Code MCP hosts, or custom orchestrators without running a network service.
-- LiteLLM keeps you model-neutral and instantly compatible with OpenAI, Anthropic, Google, Azure OpenAI, Ollama, etc. Changing James's voice is as simple as pointing at a different model alias.
-- Persona-first design: James critiques, flags risks, and asks questions; the host model remains responsible for the final answer. This avoids “two agents arguing” and mirrors human peer review.
+- *"Ask James to critique this plan"*
+- *"Get a second opinion from James before we proceed"*
+- *"Have James review this code"*
 
 ## Development
 
-- Code lives under `ask_james/`. `server.py` houses the tool definition, prompt builder, and LiteLLM call.
-- Install dev dependencies with `pip install -e .[dev]` (add your preferred extras, e.g., `ruff`, `pytest`).
-- Run `python -m ask_james` for manual stdio testing.
-- Tests are not bundled yet; contributions welcome!
-
-## Contributing
-
-Issues and pull requests are welcome. If you’re proposing substantial changes (new tools, new personas), please open an issue to discuss the use case so the “ask James” UX stays focused.
+```bash
+pip install -e .
+python -m ask_james  # manual stdio testing
+```
 
 ## License
 
-Released under the MIT License. See `LICENSE` for details.
+MIT
